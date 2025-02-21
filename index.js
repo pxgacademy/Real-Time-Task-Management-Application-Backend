@@ -130,7 +130,15 @@ async function run() {
       res.status(201).send(result);
     });
 
-    
+    // Fetch all projects
+    app.get("/projects", async (req, res, next) => {
+      try {
+        const projects = await projectsCollection.find().toArray();
+        res.json(projects);
+      } catch (error) {
+        next(error);
+      }
+    });
   } catch (error) {
     console.error("MongoDB Connection Error: ", error);
   }
