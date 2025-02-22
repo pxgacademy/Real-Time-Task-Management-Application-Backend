@@ -4,22 +4,8 @@ const cors = require("cors");
 const jwt = require("jsonwebtoken");
 const cookieParser = require("cookie-parser");
 const { MongoClient, ServerApiVersion } = require("mongodb");
-const { Server } = require("socket.io");
-const { createServer } = require("http");
 
 const app = express();
-const server = createServer(app);
-const io = new Server(server, {
-  cors: {
-    origin: [
-      "http://localhost:5173",
-      "https://task-management-app-d6f4c.web.app",
-      "https://task-management-app-d6f4c.firebaseapp.com",
-    ],
-    credentials: true,
-  },
-});
-
 const port = process.env.PORT || 5000;
 
 // Middleware
@@ -37,8 +23,7 @@ app.use(
 );
 
 // const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.rm6ii.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
-const uri = `mongodb://localhost:27017`;
-
+const uri = "mongodb://localhost:27017";
 const client = new MongoClient(uri, {
   serverApi: {
     version: ServerApiVersion.v1,
@@ -62,33 +47,14 @@ const verifyToken = (req, res, next) => {
   }
 };
 
-io.on("connection", (socket) => {
-  console.log("User Connected: ", socket.id);
-  socket.emit("welcome", "welcome to the server");
-
-  // socket.on('join', ({ room }) => {
-  //   socket.join(room)
-  //   console.log(`User joined room: ${room}`)
-  // })
-
-  socket.on("message", (data) => {
-    console.log(`Message received: ${data}`);
-    io.emit("received-message", data);
-  });
-
-  socket.on("disconnect", () => {
-    console.log("User Disconnected: ", socket.id);
-  });
-});
-
 async function run() {
   try {
-    const userCollection = client.db("TaskManagementApp").collection("users");
-    const projectsCollection = client
-      .db("TaskManagementApp")
-      .collection("projects");
     await client.connect();
     console.log("Connected to MongoDB successfully!");
+
+    const db = client.db("TaskManagementApp");
+    const userCollection = db.collection("users");
+    const projectsCollection = db.collection("projects");
 
     const cookieOptions = {
       httpOnly: true,
@@ -96,7 +62,7 @@ async function run() {
       sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
     };
 
-    // Create JWT token
+    // Authentication Routes
     app.post("/jwt", (req, res, next) => {
       try {
         const user = req.body;
@@ -109,7 +75,6 @@ async function run() {
       }
     });
 
-    // Logout (delete JWT token)
     app.delete("/logout", (req, res, next) => {
       try {
         res.clearCookie("token", cookieOptions).json({ success: true });
@@ -118,39 +83,45 @@ async function run() {
       }
     });
 
-    // create a single user
-    app.post("/users", async (req, res) => {
-      const newUser = req.body;
-      const query = { email: newUser.email };
-      const duplicateUser = await userCollection.findOne(query);
-      if (duplicateUser) {
-        return res.status(409).json({ message: "Email already exists" });
+    // User Routes
+    app.post("/users", async (req, res, next) => {
+      try {
+        const newUser = req.body;
+        const existingUser = await userCollection.findOne({
+          email: newUser.email,
+        });
+        if (existingUser) {
+          return res.status(409).json({ message: "Email already exists" });
+        }
+        const result = await userCollection.insertOne(newUser);
+        res.status(201).json(result);
+      } catch (error) {
+        next(error);
       }
-      const result = await userCollection.insertOne(newUser);
-      res.status(201).send(result);
     });
 
-    // Fetch all projects
-    app.get("/projects", async (req, res, next) => {
+    // Project Routes
+    app.get("/projects/:email", async (req, res, next) => {
       try {
-        const projects = await projectsCollection.find().toArray();
+        const email = req.params.email;
+        const projects = await projectsCollection.find({ email }).toArray();
         res.json(projects);
       } catch (error) {
         next(error);
       }
     });
   } catch (error) {
-    console.error("MongoDB Connection Error: ", error);
+    console.error("MongoDB Connection Error:", error);
   }
 }
 
 run();
 
 app.get("/", (req, res) => {
-  res.status(200).send("Task management server is running");
+  res.status(200).send("Task Management Server is running");
 });
 
-// Error Handling Middleware
+// Global Error Handling Middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
   res
@@ -158,6 +129,6 @@ app.use((err, req, res, next) => {
     .json({ message: "Internal Server Error", error: err.message });
 });
 
-server.listen(port, () => {
+app.listen(port, () => {
   console.log(`Server is running on port ${port}`);
 });
