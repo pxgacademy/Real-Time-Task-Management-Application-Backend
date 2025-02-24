@@ -35,10 +35,10 @@ const client = new MongoClient(uri, {
 const verifyToken = (req, res, next) => {
   try {
     const token = req.cookies?.token;
-    if (!token) return res.status(401).json({ message: "Unauthorized access" });
+    if (!token) return res.status(401).send({ message: "Unauthorized access" });
 
     jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
-      if (err) return res.status(401).json({ message: "Unauthorized access" });
+      if (err) return res.status(401).send({ message: "Unauthorized access" });
       req.user = decoded;
       next();
     });
@@ -49,9 +49,6 @@ const verifyToken = (req, res, next) => {
 
 async function run() {
   try {
-    await client.connect();
-    console.log("Connected to MongoDB successfully!");
-
     const db = client.db("TaskManagementApp");
     const userCollection = db.collection("users");
     const projectsCollection = db.collection("projects");
@@ -69,7 +66,7 @@ async function run() {
         const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, {
           expiresIn: "23h",
         });
-        res.cookie("token", token, cookieOptions).json({ success: true });
+        res.cookie("token", token, cookieOptions).send({ success: true });
       } catch (error) {
         next(error);
       }
@@ -77,7 +74,7 @@ async function run() {
 
     app.delete("/logout", (req, res, next) => {
       try {
-        res.clearCookie("token", cookieOptions).json({ success: true });
+        res.clearCookie("token", cookieOptions).send({ success: true });
       } catch (error) {
         next(error);
       }
@@ -91,14 +88,14 @@ async function run() {
           email: newUser.email,
         });
         if (existingUser) {
-          return res.status(409).json({ message: "Email already exists" });
+          return res.status(409).send({ message: "Email already exists" });
         }
         const result = await userCollection.insertOne(newUser);
         await projectsCollection.insertOne({
           email: newUser.email,
           project: [],
         });
-        res.status(201).json(result);
+        res.status(201).send(result);
       } catch (error) {
         next(error);
       }
@@ -129,7 +126,7 @@ async function run() {
         if (!userProjects) {
           return res
             .status(404)
-            .json({ success: false, message: "User not found!" });
+            .send({ success: false, message: "User not found!" });
         }
 
         // Generate a unique project ID based on timestamp
@@ -181,7 +178,7 @@ async function run() {
           if (!userProjects) {
             return res
               .status(404)
-              .json({ success: false, message: "User not found!" });
+              .send({ success: false, message: "User not found!" });
           }
 
           // Prepare the update object
@@ -200,12 +197,12 @@ async function run() {
           );
 
           if (result.modifiedCount > 0) {
-            res.json({
+            res.send({
               success: true,
               message: "Project updated successfully!",
             });
           } else {
-            res.status(404).json({
+            res.status(404).send({
               success: false,
               message: "Project not found or no changes made!",
             });
@@ -380,7 +377,7 @@ async function run() {
           if (!user) {
             return res
               .status(404)
-              .json({ success: false, message: "User not found!" });
+              .send({ success: false, message: "User not found!" });
           }
 
           // Check if the project exists
@@ -391,7 +388,7 @@ async function run() {
           if (!projectExists) {
             return res
               .status(404)
-              .json({ success: false, message: "Project not found!" });
+              .send({ success: false, message: "Project not found!" });
           }
 
           // Remove the task from the specified project
@@ -420,8 +417,11 @@ async function run() {
         }
       }
     );
+
+    // await client.connect();
+    // console.log("Connected to MongoDB successfully!");
   } catch (error) {
-    console.error("MongoDB Connection Error:", error);
+    // console.log("MongoDB Connection Error:", error);
   }
 }
 
@@ -433,7 +433,6 @@ app.get("/", (req, res) => {
 
 // Global Error Handling Middleware
 app.use((err, req, res, next) => {
-  console.error(err.stack);
   res
     .status(500)
     .send({ message: "Internal Server Error", error: err.message });
