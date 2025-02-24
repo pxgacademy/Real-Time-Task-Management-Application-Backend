@@ -22,8 +22,8 @@ app.use(
   })
 );
 
-// const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.rm6ii.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
-const uri = "mongodb://localhost:27017";
+const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.rm6ii.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
+// const uri = "mongodb://localhost:27017";
 const client = new MongoClient(uri, {
   serverApi: {
     version: ServerApiVersion.v1,
@@ -94,6 +94,10 @@ async function run() {
           return res.status(409).json({ message: "Email already exists" });
         }
         const result = await userCollection.insertOne(newUser);
+        await projectsCollection.insertOne({
+          email: newUser.email,
+          project: [],
+        });
         res.status(201).json(result);
       } catch (error) {
         next(error);
@@ -266,41 +270,43 @@ async function run() {
 
     // insert a new task to a specific project
     app.post(
-      "/projects/:projectId/projectIndex/:projectIndex/tasks",
+      "/projects/:userId/project/:projectId/tasks",
       async (req, res, next) => {
         try {
-          const { projectId, projectIndex } = req.params;
-          const newTask = req.body;
+          const { userId, projectId } = req.params;
+          let newTask = req.body;
 
-          // Add an `index` to the new task based on existing tasks count
-          const project = await projectsCollection.findOne({
-            _id: new ObjectId(projectId),
-            "project.index": parseInt(projectIndex),
+          // Generate a unique ID based on the current timestamp
+          newTask.id = Date.now();
+
+          // Find the user and the project by filtering with project ID
+          const userProjects = await projectsCollection.findOne({
+            _id: new ObjectId(userId),
           });
 
-          if (!project) {
+          if (!userProjects) {
             return res
               .status(404)
-              .json({ success: false, message: "Project not found!" });
+              .send({ success: false, message: "User not found!" });
           }
 
-          const taskList =
-            project.project.find((p) => p.index === parseInt(projectIndex))
-              ?.tasks || [];
-          newTask.index = taskList.length; // Set index as the next available number
+          const projectExists = userProjects.project.some(
+            (p) => p.id.toString() === projectId
+          );
+          if (!projectExists) {
+            return res
+              .status(404)
+              .send({ success: false, message: "Project not found!" });
+          }
 
-          // Push new task to the project
+          // Push new task to the project's task array
           const result = await projectsCollection.updateOne(
-            {
-              _id: new ObjectId(projectId),
-              "project.index": parseInt(projectIndex),
-            },
-            { $push: { "project.$[proj].tasks": newTask } },
-            { arrayFilters: [{ "proj.index": parseInt(projectIndex) }] }
+            { _id: new ObjectId(userId), "project.id": Number(projectId) },
+            { $push: { "project.$.tasks": newTask } }
           );
 
           if (result.modifiedCount > 0) {
-            res.json({
+            res.send({
               success: true,
               message: "Task added successfully!",
               task: newTask,
@@ -308,7 +314,7 @@ async function run() {
           } else {
             res
               .status(500)
-              .json({ success: false, message: "Failed to add task!" });
+              .send({ success: false, message: "Failed to add task!" });
           }
         } catch (error) {
           next(error);
@@ -357,24 +363,49 @@ async function run() {
       }
     );
 
-    // delete a specific task from a project
+    // delete a specific task from project
     app.delete(
-      "/projects/:projectId/projectIndex/:projectIndex/tasks/:taskIndex",
+      "/projects/:userId/project/:projectId/tasks/:taskId",
       async (req, res, next) => {
         try {
-          const { projectId, projectIndex, taskIndex } = req.params;
+          const { userId } = req.params;
+          const projectId = Number(req.params.projectId); // Convert to number
+          const taskId = Number(req.params.taskId); // Convert to number
 
+          // Find the user document
+          const user = await projectsCollection.findOne({
+            _id: new ObjectId(userId),
+          });
+
+          if (!user) {
+            return res
+              .status(404)
+              .json({ success: false, message: "User not found!" });
+          }
+
+          // Check if the project exists
+          const projectExists = user.project.some(
+            (proj) => proj.id === projectId
+          );
+
+          if (!projectExists) {
+            return res
+              .status(404)
+              .json({ success: false, message: "Project not found!" });
+          }
+
+          // Remove the task from the specified project
           const result = await projectsCollection.updateOne(
             {
-              _id: new ObjectId(projectId),
-              "project.index": parseInt(projectIndex),
+              _id: new ObjectId(userId),
+              "project.id": projectId,
             },
             {
               $pull: {
-                "project.$[proj].tasks": { index: parseInt(taskIndex) },
+                "project.$[proj].tasks": { id: taskId },
               },
             },
-            { arrayFilters: [{ "proj.index": parseInt(projectIndex) }] }
+            { arrayFilters: [{ "proj.id": projectId }] }
           );
 
           if (result.modifiedCount > 0) {
@@ -405,7 +436,7 @@ app.use((err, req, res, next) => {
   console.error(err.stack);
   res
     .status(500)
-    .json({ message: "Internal Server Error", error: err.message });
+    .send({ message: "Internal Server Error", error: err.message });
 });
 
 app.listen(port, () => {
